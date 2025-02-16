@@ -24,6 +24,7 @@ class Host:
 
         # Constants
         self.link = None            # The link between this host and its assigned router. This gets assigned during create_network() in the Network class.
+        self.isHost = True
         self.state = 'OFF'          # State: ON or OFF
         self.cwnd = 1               # Congestion Window for TCP
         self.rto = 1                # Retransmission Timeout
@@ -75,28 +76,25 @@ class Host:
     def send_packet(self):
         # Send a packet to the nearest router
         if self.state == 'ON':
-            # Determine the closest router (based on x,y coords)
-            nearest_router = self.network.routers[0]
-            min_dist = float('inf')
-            for router in self.network.routers:
-                dist = (router.x - self.x) ** 2 + (router.y - self.y) ** 2
-                if dist < min_dist:
-                    nearest_router = router
-                    min_dist = dist
-            
-            # Send packets from TCP queues
-            for _, queue in self.tcp_queues.items():
-                while self.cwnd > 0 and queue:
-                    self.cwnd -= 1
-                    packet = queue.pop(0)
-                    nearest_router.receive_packet(packet)
-                    print(f"Host {self.id}: Sent TCP packet to Router {nearest_router.id}")
-            
-            # Send packets from UDP queues
-            while self.udp_queue:
-                packet = self.udp_queue.pop(0)
-                nearest_router.receive_packet(packet)
-                print(f"Host {self.id}: Sent UDP packet to Router {nearest_router.id}")
+            # Decide which queue (TCP or UDP) to send a packet from
+            send_tcp = random.uniform(0, 1)
+
+            if send_tcp:
+                # Send packets from a random TCP queue
+                key = random.choice(list(self.tcp_queues.keys()))       # Line of code adapted from https://www.slingacademy.com/article/python-how-to-get-a-random-item-from-a-dictionary/
+                if self.tcp_queues[key]:
+                    packet = self.tcp_queues[key].pop(0)
+                    self.link.queue.append(packet)
+                    print(f"Host {self.id}: Sent TCP packet to Router {self.link.destination.id}")
+                if not self.tcp_queues[key]:
+                    # Delete the queue if it is now empty
+                    self.tcp_queues.pop(key)
+            else:
+                # Send packets from UDP queues
+                if self.udp_queue:
+                    packet = self.udp_queue.pop(0)
+                    self.link.queue.append(packet)
+                    print(f"Host {self.id}: Sent UDP packet to Router {self.link.destination.id}")
 
     def receive_packet(self):
         self.received_packets += 1
@@ -110,8 +108,13 @@ class Router:
         self.y = y
         self.buffer_size = buffer_size
         self.network = network
+
+        # Queues
         self.tcp_queues = {}        # Dictionary of TCP queues
         self.udp_queue = []         # Shared UDP queue
+
+        # Constants
+        self.isHost = False
     
     def send_packet(self, packet):
         # Send packet to a link
@@ -213,29 +216,29 @@ class Network:
             nearest_router = min(self.routers, key=lambda router: (router.x - host.x) ** 2 + (router.y - host.y) ** 2)  # Uses pythagorean theorem to find the closest router
             delay = random.randint(1, 5)        # Random delay between 1 and 5 ticks
             # Create link from host -> nearest router
-            link = Link(host, nearest_router, delay)
-            self.links.append(link)
-            host.link = link
+            link1 = Link(host, nearest_router, delay)
+            self.links.append(link1)
+            host.link = link1
             # Create link from nearest router -> host
-            link = Link(nearest_router, host, delay)
-            self.links.append(link)
+            link2 = Link(nearest_router, host, delay)
+            self.links.append(link2)
 
         # Create a link between every router for simplicity (normally this wouldn't be the case)
         for router1 in self.routers:
             for router2 in self.routers:
+                if router1.id == router2.id:
+                    continue
                 delay = random.randint(1, 5)    # Random delay between 1 and 5 ticks
                 # Create link from router1 -> router2 
-                link = Link(router1, router2, delay)
-                self.links.append(link)
-                # Create link from router2 -> router1
-                link = Link(router2, router1, delay)
-                self.links.append(link)
+                link1 = Link(router1, router2, delay)
+                self.links.append(link1)
+                # No need to create a link from router2 -> router1, because it will happen later
 
     def run_simulation(self, ticks):
         for tick in range(ticks):
             self.simulate_tick(tick)
     
-    def simulate_tick(self, tick):
+    def simulate_tick(self, _):
         # Process packets in the network
         for host in self.hosts:
             host.generate_packet()
@@ -245,12 +248,13 @@ class Network:
         for link in self.links:
             link.propagate()
         
+        # NOTE: This needs to be redone
         # Apply RED for packet dropping
-        for router in self.routers:
-            for next_router in router.queues:
-                if self.red.drop_packet(len(router.queues[next_router])):
-                    packet = router.queues[next_router].pop(0)  # Drop packet
-                    print(f"Router {router.id}: Dropped packet from {packet['source'].id} to {packet['destination'].id}")
+        # for router in self.routers:
+        #     for next_router in router.queues:
+        #         if self.red.drop_packet(len(router.queues[next_router])):
+        #             packet = router.queues[next_router].pop(0)  # Drop packet
+        #             print(f"Router {router.id}: Dropped packet from {packet['source'].id} to {packet['destination'].id}")
     
     def print_network_status(self):
         # Print current status of network (for debugging)
@@ -268,7 +272,13 @@ class Network:
         print("|   Links:   |")
         print("--------------")
         for link in self.links:
-            print(f"Link between {router.id} at ({router.x}, {router.y})")
+            identity1 = "Router"
+            identity2 = "Router"
+            if link.source.isHost:
+                identity1 = "Host"
+            if link.destination.isHost:
+                identity2 = "Host"
+            print(f"Link between {identity1} {link.source.id} and {identity2} {link.destination.id}")
 
 # Main Execution
 
@@ -287,6 +297,15 @@ wq = 0.1  # Weight for RED average queue size
 network = Network(num_hosts, num_routers, maxp, minth, maxth, wq)
 
 # Run simulation
-network.run_simulation(10)  # Run for 1000 ticks
+network.run_simulation(1000)  # Run for 1000 ticks
 if debug:
     network.print_network_status()
+    print("")
+
+    # Peek at Router 0's queues (uncomment for debug)
+    # for i in network.hosts[0].udp_queue:
+    #     print(f"{i['type']}")
+
+    # for queue in network.hosts[0].tcp_queues.values():
+    #     for i in queue:
+    #         print(f"{i['type']}")
