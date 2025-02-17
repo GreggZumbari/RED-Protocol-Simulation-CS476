@@ -41,7 +41,7 @@ class Host:
             packet_type = random.choice(['TCP', 'UDP'])
             self.enqueue_packet(packet_type, destination)
             if debug:
-                print(f"Host {self.id}: Queued {packet_type} packet to be sent to Host {destination.id}")
+                print(f"Host {self.id}: \tQueued {packet_type} packet to be sent to Host {destination.id}")
     
     def enqueue_packet(self, packet_type, destination):
         # Insert a packet into the appropriate queue
@@ -84,7 +84,7 @@ class Host:
                 if self.tcp_queues[key]:
                     packet = self.tcp_queues[key].pop(0)
                     self.link.queue.append(packet)
-                    print(f"Host {self.id}: Sent TCP packet to Router {self.link.destination.id}")
+                    print(f"Host {self.id}: \tSent TCP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
                 if not self.tcp_queues[key]:
                     # Delete the queue if it is now empty
                     self.tcp_queues.pop(key)
@@ -93,7 +93,7 @@ class Host:
                 if self.udp_queue:
                     packet = self.udp_queue.pop(0)
                     self.link.queue.append(packet)
-                    print(f"Host {self.id}: Sent UDP packet to Router {self.link.destination.id}")
+                    print(f"Host {self.id}: \tSent UDP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
 
     def receive_packet(self, packet):
         self.received_packets.append(packet)
@@ -139,7 +139,7 @@ class Router:
                 identity = "Router"
                 if link.destination.isHost:
                     identity = "Host"
-                print(f"Router {self.id}: Sent TCP packet to {identity} {link.destination.id}")
+                print(f"Router {self.id}: \tSent TCP packet to {identity} {link.destination.id} (Destination: Host {destination.id})")
             if not self.tcp_queues[key]:
                 # Delete the queue if it is now empty
                 self.tcp_queues.pop(key)
@@ -158,7 +158,7 @@ class Router:
                 identity = "Router"
                 if link.destination.isHost:
                     identity = "Host"
-                print(f"Router {self.id}: Sent UDP packet to Router {link.destination.id}")
+                print(f"Router {self.id}: \tSent UDP packet to Router {link.destination.id} (Destination: Host {destination.id})")
 
     # def send_packet(self, packet):
     #     # Send packet to a link
@@ -212,7 +212,7 @@ class Link:
                         identity1 = "Host"
                     if self.destination.isHost:
                         identity2 = "Host"
-                    print(f"Link: Sending {packet['type']} packet from {identity1} {self.source.id} to {identity2} {self.destination.id}")
+                    print(f"Link: \t\tSending {packet['type']} packet from {identity1} {self.source.id} to {identity2} {self.destination.id} (Destination: Host {packet["destination"].id})")
                     self.destination.receive_packet(packet)
         else:
             self.delay_countdown -= 1
