@@ -128,13 +128,15 @@ class Router:
                 source = packet['source']
                 destination = packet['destination']
 
-                # Find a router that has a link to the distination host, and send the packet to that router
-                link = network.get_link(destination)
+                # Find a router that has a link to the destination host, and send the packet to that router
+                next_router = network.get_link(None, destination).source
+                link = network.get_link(self, next_router)
+
+                # If the destination host is also conected to this router, just send it there instead
+                if self.id == next_router.id and self.isHost == next_router.isHost:
+                    link = network.get_link(self, destination)
                 
-                host = packet['destination']
-                if host not in self.tcp_queues:
-                    self.tcp_queues[host] = []
-                self.tcp_queues[host].append(packet)
+                link.queue.append(packet)
 
                 identity = "Router"
                 if link.destination.isHost:
@@ -151,7 +153,12 @@ class Router:
                 destination = packet['destination']
 
                 # Find a router that has a link to the distination host, and send the packet to that router
-                link = network.get_link(destination)
+                next_router = network.get_link(None, destination).source
+                link = network.get_link(self, next_router)
+
+                # If the destination host is also conected to this router, just send it there instead
+                if self.id == next_router.id and self.isHost == next_router.isHost:
+                    link = network.get_link(self, destination)
 
                 link.queue.append(packet)
 
@@ -212,7 +219,7 @@ class Link:
                         identity1 = "Host"
                     if self.destination.isHost:
                         identity2 = "Host"
-                    print(f"Link: \t\tSending {packet['type']} packet from {identity1} {self.source.id} to {identity2} {self.destination.id} (Destination: Host {packet["destination"].id})")
+                    print(f"Link: \t\tSent {packet['type']} packet from {identity1} {self.source.id} to {identity2} {self.destination.id} (Destination: Host {packet["destination"].id})")
                     self.destination.receive_packet(packet)
         else:
             self.delay_countdown -= 1
@@ -340,17 +347,14 @@ class Network:
 
     # Checks if the link with the specified source & destination exists, and returns it if so. This is my favorite function of all time.
     def get_link(self, source, destination):
-        for link in self.links:
-            print(f"link.source: {link.source}, source: {source}")
-            if link.source.id == source.id and link.source.isHost == source.isHost and link.destination.id == destination.id and link.destination.isHost == destination.isHost:
-                return link
-        return None  # No link with specified source & destination was found
-    
-    # Returns the first link that has the specified destination. This is my second favorite function of all time.
-    def get_link(self, destination):
-        for link in self.links:
-            if link.destination.id == destination.id and link.destination.isHost == destination.isHost:
-                return link
+        if source == None:  # Returns the first link that has the specified destination.
+            for link in self.links:
+                if link.destination.id == destination.id and link.destination.isHost == destination.isHost:
+                    return link
+        else:
+            for link in self.links:
+                if link.source.id == source.id and link.source.isHost == source.isHost and link.destination.id == destination.id and link.destination.isHost == destination.isHost:
+                    return link
         return None  # No link with specified source & destination was found
 
 # Main Execution
