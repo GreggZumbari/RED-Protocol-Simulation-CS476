@@ -41,7 +41,7 @@ class Host:
             packet_type = random.choice(['TCP', 'UDP'])
             self.enqueue_packet(packet_type, destination)
             if debug:
-                print(f"Host {self.id}: \tQueued {packet_type} packet to be sent to Host {destination.id}")
+                if debug: print(f"Host {self.id}: \tQueued {packet_type} packet to be sent to Host {destination.id}")
     
     def enqueue_packet(self, packet_type, destination):
         # Insert a packet into the appropriate queue
@@ -93,7 +93,7 @@ class Host:
                 if self.udp_queue:
                     packet = self.udp_queue.pop(0)
                     self.link.queue.append(packet)
-                    print(f"Host {self.id}: \tSent UDP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
+                    if debug: print(f"Host {self.id}: \tSent UDP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
             global sentP
             sentP = sentP+1
 
@@ -145,7 +145,7 @@ class Router:
                 identity = "Router"
                 if link.destination.isHost:
                     identity = "Host"
-                print(f"Router {self.id}: \tSent TCP packet to {identity} {link.destination.id} (Destination: Host {destination.id})")
+                if debug: print(f"Router {self.id}: \tSent TCP packet to {identity} {link.destination.id} (Destination: Host {destination.id})")
             if not self.tcp_queues[key]:
                 # Delete the queue if it is now empty
                 self.tcp_queues.pop(key)
@@ -170,7 +170,7 @@ class Router:
                     identity = "Router"
                     if link.destination.isHost:
                         identity = "Host"
-                    print(f"Router {self.id}: \tSent UDP packet to Router {link.destination.id} (Destination: Host {destination.id})")
+                    if debug: print(f"Router {self.id}: \tSent UDP packet to Router {link.destination.id} (Destination: Host {destination.id})")
 
     # def send_packet(self, packet):
     #     # Send packet to a link
