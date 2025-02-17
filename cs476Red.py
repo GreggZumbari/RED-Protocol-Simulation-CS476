@@ -41,7 +41,7 @@ class Host:
             packet_type = random.choice(['TCP', 'UDP'])
             self.enqueue_packet(packet_type, destination)
             if debug:
-                if debug == True: print(f"Host {self.id}: \tQueued {packet_type} packet to be sent to Host {destination.id}")
+                print(f"Host {self.id}: \tQueued {packet_type} packet to be sent to Host {destination.id}")
     
     def enqueue_packet(self, packet_type, destination):
         # Insert a packet into the appropriate queue
@@ -84,7 +84,7 @@ class Host:
                 if self.tcp_queues[key]:
                     packet = self.tcp_queues[key].pop(0)
                     self.link.queue.append(packet)
-                    if debug == True: print(f"Host {self.id}: \tSent TCP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
+                    print(f"Host {self.id}: \tSent TCP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
                 if not self.tcp_queues[key]:
                     # Delete the queue if it is now empty
                     self.tcp_queues.pop(key)
@@ -93,14 +93,10 @@ class Host:
                 if self.udp_queue:
                     packet = self.udp_queue.pop(0)
                     self.link.queue.append(packet)
-                    if debug == True: print(f"Host {self.id}: \tSent UDP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
-            global sentP
-            sentP = sentP+1
+                    print(f"Host {self.id}: \tSent UDP packet to Router {self.link.destination.id} (Destination: Host {packet["destination"].id})")
 
     def receive_packet(self, packet):
         self.received_packets.append(packet)
-        #global recP
-        #recP = recP+1
 
 # Router Class
 class Router:
@@ -132,18 +128,20 @@ class Router:
                 source = packet['source']
                 destination = packet['destination']
 
-                # Find a router that has a link to the distination host, and send the packet to that router
-                link = network.get_link(destination)
+                # Find a router that has a link to the destination host, and send the packet to that router
+                next_router = network.get_link(None, destination).source
+                link = network.get_link(self, next_router)
+
+                # If the destination host is also conected to this router, just send it there instead
+                if self.id == next_router.id and self.isHost == next_router.isHost:
+                    link = network.get_link(self, destination)
                 
-                host = packet['destination']
-                if host not in self.tcp_queues:
-                    self.tcp_queues[host] = []
-                self.tcp_queues[host].append(packet)
+                link.queue.append(packet)
 
                 identity = "Router"
                 if link.destination.isHost:
                     identity = "Host"
-                if debug == True: print(f"Router {self.id}: \tSent TCP packet to {identity} {link.destination.id} (Destination: Host {destination.id})")
+                print(f"Router {self.id}: \tSent TCP packet to {identity} {link.destination.id} (Destination: Host {destination.id})")
             if not self.tcp_queues[key]:
                 # Delete the queue if it is now empty
                 self.tcp_queues.pop(key)
@@ -155,15 +153,19 @@ class Router:
                 destination = packet['destination']
 
                 # Find a router that has a link to the distination host, and send the packet to that router
-                link = network.get_link(destination)
+                next_router = network.get_link(None, destination).source
+                link = network.get_link(self, next_router)
+
+                # If the destination host is also conected to this router, just send it there instead
+                if self.id == next_router.id and self.isHost == next_router.isHost:
+                    link = network.get_link(self, destination)
 
                 link.queue.append(packet)
 
                 identity = "Router"
                 if link.destination.isHost:
                     identity = "Host"
-                if debug == True: print(f"Router {self.id}: \tSent UDP packet to Router {link.destination.id} (Destination: Host {destination.id})")
-
+                print(f"Router {self.id}: \tSent UDP packet to Router {link.destination.id} (Destination: Host {destination.id})")
 
     # def send_packet(self, packet):
     #     # Send packet to a link
@@ -181,22 +183,13 @@ class Router:
 
     def receive_packet(self, packet):
         # Add this packet to the queue
-        global dropP
         if packet['type'] == 'TCP':
             host = packet['destination']
             if host not in self.tcp_queues:
                 self.tcp_queues[host] = []
-                if len(self.tcp_queues[host]) < self.buffer_size: self.tcp_queues[host].append(packet)
-                else: 
-                    if debug == True: print(f"Router {self.id}: Dropped packet from {packet['source'].id} to {self.id}")
-                    dropP = dropP+1
-
+            self.tcp_queues[host].append(packet)
         elif packet['type'] == 'UDP':
-                if len(self.udp_queue) < self.buffer_size: self.udp_queue.append(packet)
-                else: 
-                    if debug == True: print(f"Router {self.id}: Dropped packet from {packet['source'].id} to {self.id}")
-                    dropP = dropP+1
-
+            self.udp_queue.append(packet)
 
 # Link Class
 # Note: Links are one-directional. They can only go from source to destination.
@@ -226,7 +219,7 @@ class Link:
                         identity1 = "Host"
                     if self.destination.isHost:
                         identity2 = "Host"
-                    if debug == True: print(f"Link: \t\tSending {packet['type']} packet from {identity1} {self.source.id} to {identity2} {self.destination.id} (Destination: Host {packet["destination"].id})")
+                    print(f"Link: \t\tSent {packet['type']} packet from {identity1} {self.source.id} to {identity2} {self.destination.id} (Destination: Host {packet["destination"].id})")
                     self.destination.receive_packet(packet)
         else:
             self.delay_countdown -= 1
@@ -254,7 +247,7 @@ class RED:
 
 # Network Class
 class Network:
-    def __init__(self, num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq):
+    def __init__(self, num_hosts, num_routers, maxp, minth, maxth, wq):
         self.hosts = []
         self.routers = []
         self.links = []
@@ -268,13 +261,13 @@ class Network:
     def create_network(self, num_hosts, num_routers):
         # Initialize hosts and routers
         for i in range(num_hosts):
-            x, y = random.uniform(0, propScale), random.uniform(0, propScale)  # Random positions for simplicity
-            host = Host(i, x, y, aOn, aOff, self)
+            x, y = random.uniform(0, 10), random.uniform(0, 10)  # Random positions for simplicity
+            host = Host(i, x, y, 1.5, 1.5, self)
             self.hosts.append(host)
 
         for i in range(num_routers):
-            x, y = random.uniform(0, propScale), random.uniform(0, propScale)
-            router = Router(i, x, y, buffSize, self)
+            x, y = random.uniform(0, 10), random.uniform(0, 10)
+            router = Router(i, x, y, 10, self)
             self.routers.append(router)
 
         # Create links between hosts and their nearest router (simple model)
@@ -327,34 +320,7 @@ class Network:
         #         if self.red.drop_packet(len(router.queues[next_router])):
         #             packet = router.queues[next_router].pop(0)  # Drop packet
         #             print(f"Router {router.id}: Dropped packet from {packet['source'].id} to {packet['destination'].id}")
-    def qCheck(self):
-        fullQ = 0
-        totalQ = 0
-        for router in self.routers:
-            totalQ = totalQ+1 #UDP queue
-            if len(router.udp_queue) >= buffSize: fullQ = fullQ+1
-            for queue in router.tcp_queues.values(): #TCP queues
-                totalQ = totalQ+1
-                if len(queue) >= buffSize: fullQ = fullQ+1
-                
-        for host in self.hosts:
-            totalQ = totalQ+1 #UDP queue
-            if len(host.udp_queue) >= buffSize: fullQ = fullQ+1
-            for queue in host.tcp_queues.values(): #TCP queues
-                totalQ = totalQ+1
-                if len(queue) >= buffSize: fullQ = fullQ+1
-        propQ = fullQ / totalQ
-        return propQ
-            
-    def print_network_data(self):
-        qSum = 0
-        for router in self.routers:
-            qSum = qSum + len(router.udp_queue)
-            for queue in router.tcp_queues.values(): qSum = qSum + len(queue)
-        qAvg = qSum / len(self.routers)
-        qProp = self.qCheck()
-        print(f"Total packets sent: {sentP}, total packets dropped: {dropP}.\nAverage Queue length: {qAvg}.\nProportion of full Queues: {qProp}")
-
+    
     def print_network_status(self):
         # Print current status of network (for debugging)
         print("--------------")
@@ -381,54 +347,35 @@ class Network:
 
     # Checks if the link with the specified source & destination exists, and returns it if so. This is my favorite function of all time.
     def get_link(self, source, destination):
-        for link in self.links:
-            print(f"link.source: {link.source}, source: {source}")
-            if link.source.id == source.id and link.source.isHost == source.isHost and link.destination.id == destination.id and link.destination.isHost == destination.isHost:
-                return link
-        return None  # No link with specified source & destination was found
-    
-    # Returns the first link that has the specified destination. This is my second favorite function of all time.
-    def get_link(self, destination):
-        for link in self.links:
-            if link.destination.id == destination.id and link.destination.isHost == destination.isHost:
-                return link
+        if source == None:  # Returns the first link that has the specified destination.
+            for link in self.links:
+                if link.destination.id == destination.id and link.destination.isHost == destination.isHost:
+                    return link
+        else:
+            for link in self.links:
+                if link.source.id == source.id and link.source.isHost == source.isHost and link.destination.id == destination.id and link.destination.isHost == destination.isHost:
+                    return link
         return None  # No link with specified source & destination was found
 
 # Main Execution
 
 # Debug variable - set to True for debug messages
-#debug = True
-debug = False
-
-
-# Data tracking variables
-sentP = 0
-dropP = 0
-#recP = 0
-#dropP = sentP-recP
-Qlen = 0
-Qprop = 0
+debug = True
 
 # Initialize network parameters
 num_hosts = 3
 num_routers = 2
-buffSize = 10
-aOn = 1.5
-aOff = 1.5
-propScale = 10
-# Initialize RED parameters
 maxp = 0  # Max packet drop probability
 minth = 1  # Min threshold for RED
 maxth = 3  # Max threshold for RED
 wq = 0.1  # Weight for RED average queue size
 
 # Create the network
-network = Network(num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq)
+network = Network(num_hosts, num_routers, maxp, minth, maxth, wq)
 
 # Run simulation
-network.run_simulation(3000)  # Run for 1000 ticks
+network.run_simulation(10)  # Run for 1000 ticks
 
-network.print_network_data()
 if debug:
     network.print_network_status()
 
