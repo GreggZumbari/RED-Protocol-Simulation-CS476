@@ -3,9 +3,9 @@ import random
 import math
 import matplotlib.pyplot as plt     # Code adapted from this tutorial: https://www.geeksforgeeks.org/graph-plotting-in-python-set-1/
 
-CONTROL = 0
-RED = 1
-URED = 2
+CC_CONTROL = 0
+CC_RED = 1
+CC_URED = 2
 
 # Helper function to generate Pareto-distributed durations (ON/OFF states)
 def pareto(x_min, alpha):
@@ -231,6 +231,11 @@ class Link:
         else:
             self.delay_countdown -= 1
 
+# Control Algorithm - No Congestion Control
+class CONTROL:
+    def drop_packet(self, _):
+        return False
+
 # RED Algorithm for packet dropping
 class RED:
     def __init__(self, minth, maxth, maxp, wq):
@@ -251,10 +256,40 @@ class RED:
             # Geometric distribution
             p = (self.avg_queue_size - self.minth) / (self.maxth - self.minth) * self.maxp
             return random.random() < p
+        
+# URED Algorithm for packet dropping
+# This is a very basic implementation of URED - the article didn't give a specific method, so I developed this one
+class URED:
+    def __init__(self, minth, maxth, maxp, wq):
+        self.minth = minth
+        self.maxth = maxth
+        self.maxp = maxp
+        self.wq = wq
+        self.avg_queue_size = 0
+        self.U = maxth * 2
+        self.ured_adjustment_factor = 0.1   # Number between 0 and 1. Higher number makes maxp more swingy
+    
+    def drop_packet(self, queue_size):
+        # Apply URED algorithm for packet dropping
+        self.avg_queue_size = (1 - self.wq) * self.avg_queue_size + self.wq * queue_size
+        if self.avg_queue_size < self.minth:
+            # Decrease maxp to a min of (minp + 1)
+            if self.maxth > (self.minth + 1):
+                self.maxth = int((self.maxth * (1 - self.ured_adjustment_factor)) + ((self.minth + 1) * self.ured_adjustment_factor))
+            return False
+        elif self.avg_queue_size > self.maxth:
+            # Increase maxp to a max of U
+            if self.maxth < self.U:
+                self.maxth = int((self.maxth * (1 - self.ured_adjustment_factor)) + (self.U * self.ured_adjustment_factor))
+            return True
+        else:
+            # Geometric distribution
+            p = (self.avg_queue_size - self.minth) / (self.maxth - self.minth) * self.maxp
+            return random.random() < p
 
 # Network Class
 class Network:
-    def __init__(self, num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq):
+    def __init__(self, num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq, congestionControl):
         # Network variables
         self.hosts = []
         self.routers = []
@@ -267,15 +302,25 @@ class Network:
         self.minth = minth
         self.maxth = maxth
         self.wq = wq
-        self.red = RED(minth, maxth, maxp, wq)
+
+        # Set congestion control
+        self.cc = None
+        if congestionControl == 0:
+            self.cc = CONTROL()
+        if congestionControl == 1:
+            self.cc = RED(minth, maxth, maxp, wq)
+        if congestionControl == 2:
+            self.cc = URED(minth, maxth, maxp, wq)
+
         self.create_network(num_hosts, num_routers)
 
         # Data logging variables
         self.ticknum = 0
         self.ticknums = []
         self.droppedPacketPercentages = []
+        self.averageQueueSizes = []
     
-    # Creates the whole network. This is done during __init__().
+    # Creates the whole network. This is done during __init__.
     def create_network(self, num_hosts, num_routers):
         # Initialize hosts and routers
         for i in range(num_hosts):
@@ -321,6 +366,14 @@ class Network:
             # Log data between each tick
             self.ticknums.append(self.ticknum)
             self.droppedPacketPercentages.append(dropP / sentP)
+
+            qSum = 0
+            for router in self.routers:
+                qSum = qSum + len(router.udp_queue)
+                for queue in router.tcp_queues.values(): qSum = qSum + len(queue)
+            qAvg = qSum / len(self.routers)
+            self.averageQueueSizes.append(qAvg)
+
             self.ticknum += 1
     
     # When this is called, one tick of time passes on the network
@@ -342,12 +395,12 @@ class Network:
         for router in self.routers:
             global dropP
             for next_router in router.tcp_queues:
-                if self.red.drop_packet(len(router.tcp_queues[next_router])):
+                if self.cc.drop_packet(len(router.tcp_queues[next_router])):
                     if len(router.tcp_queues[next_router]) > 0: 
                         packet = router.tcp_queues[next_router].pop(0)  # Drop packet
                         if debug == True: print(f"Router {router.id}: Dropped packet from {packet['source'].id} to {packet['destination'].id}")
                         dropP = dropP+1
-            if self.red.drop_packet(len(router.udp_queue)):
+            if self.cc.drop_packet(len(router.udp_queue)):
                     if len(router.udp_queue) > 0:  
                         packet = router.udp_queue.pop(0)  # Drop packet
                         if debug == True: print(f"Router {router.id}: Dropped packet from {packet['source'].id} to {packet['destination'].id}")
@@ -381,7 +434,7 @@ class Network:
             for queue in router.tcp_queues.values(): qSum = qSum + len(queue)
         qAvg = qSum / len(self.routers)
         qProp = self.qCheck()
-        print(f"Total packets sent: {sentP}, total packets dropped: {dropP}.\nAverage Queue length: {qAvg}.\nProportion of full Queues: {qProp}")
+        print(f"total packets sent: {sentP}, total packets dropped: {dropP}\naverage queue length: {qAvg}, proportion of full queues: {qProp}")
 
     # Print a list of every current host, router, and link (for debugging)
     def print_network_status(self):
@@ -421,17 +474,31 @@ class Network:
     
     # Prints graphs of the data logged during runtime
     def print_graphs(self):
+        ccstring = ""
+        if congestionControl == 0:
+            ccstring = "(No CC)"
+        if congestionControl == 1:
+            ccstring = "(RED)"
+        if congestionControl == 2:
+            ccstring = "(URED)"
+
         # % of Dropped Packets on each Tick
         plt.plot(self.ticknums, self.droppedPacketPercentages)
         plt.xlabel("Ticks")
         plt.ylabel("% of Dropped Packets")
-        plt.title("Proportion of Dropped Packets over Time")
+        plt.title("Proportion of Dropped Packets over Time " + ccstring)
+        plt.show()
+
+        # Average Queue Size on each Tick
+        plt.plot(self.ticknums, self.averageQueueSizes)
+        plt.xlabel("Ticks")
+        plt.ylabel("Average Queue Length")
+        plt.title("Average Queue Length over Time " + ccstring)
         plt.show()
 
 # Main Execution
 
 # Debug variable - set to True for debug messages
-#debug = True
 debug = False
 
 # Logging variable - set to True for data logging (will produce a graph)
@@ -445,6 +512,7 @@ Qprop = 0
 
 # Initialize network parameters
 num_hosts = 10
+num_attackers = 10
 num_routers = 10
 buffSize = 10
 aOn = 1.5
@@ -457,12 +525,17 @@ minth = 1  # Min threshold for RED
 maxth = 3  # Max threshold for RED
 wq = 0.1  # Weight for RED average queue size
 
+# Get the user to choose which congestion control to use
+congestionControl = None
+while congestionControl != CC_CONTROL and congestionControl != CC_RED and congestionControl != CC_URED:
+    congestionControl = int(input("Type 0 for no CC, 1 for RED, or 2 for URED\n"))
+
 # Create the network
-network = Network(num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq)
+network = Network(num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq, congestionControl)
 
 # Run simulation
 network.run_simulation(3000)  # Run for 1000 ticks
-print(f"Test parameters: Hosts: {num_hosts}, Routers: {num_routers}, Buffersize: {buffSize}, alphaOn: {aOn}, AlphaOff: {aOff}, Scale factor: {propScale}. RED variables: maxp: {maxp}, min threshold: {minth}, max threshold: {maxth}, wq: {wq}")
+print(f"- Test Parameters -\nhosts: {num_hosts}, routers: {num_routers}, buffer size: {buffSize}, alphaOn: {aOn}, alphaOff: {aOff} scale factor: {propScale}.\n- Congestion Control Variables -\nmaxp: {maxp}, min threshold: {minth}, max threshold: {maxth}, wq: {wq}")
 network.print_network_data()
 
 if debug:
