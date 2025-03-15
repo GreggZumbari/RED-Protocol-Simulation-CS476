@@ -1,6 +1,11 @@
 import numpy as np
 import random
 import math
+import matplotlib.pyplot as plt     # Code adapted from this tutorial: https://www.geeksforgeeks.org/graph-plotting-in-python-set-1/
+
+CONTROL = 0
+RED = 1
+URED = 2
 
 # Helper function to generate Pareto-distributed durations (ON/OFF states)
 def pareto(x_min, alpha):
@@ -250,26 +255,37 @@ class RED:
 # Network Class
 class Network:
     def __init__(self, num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, minth, maxth, wq):
+        # Network variables
         self.hosts = []
         self.routers = []
         self.links = []
+        self.aOn = aOn
+        self.aOff = aOff
+        self.buffSize = buffSize
+        self.propScale = propScale
         self.maxp = maxp
         self.minth = minth
         self.maxth = maxth
         self.wq = wq
         self.red = RED(minth, maxth, maxp, wq)
         self.create_network(num_hosts, num_routers)
+
+        # Data logging variables
+        self.ticknum = 0
+        self.ticknums = []
+        self.droppedPacketPercentages = []
     
+    # Creates the whole network. This is done during __init__().
     def create_network(self, num_hosts, num_routers):
         # Initialize hosts and routers
         for i in range(num_hosts):
-            x, y = random.uniform(0, propScale), random.uniform(0, propScale)  # Random positions for simplicity
-            host = Host(i, x, y, aOn, aOff, self)
+            x, y = random.uniform(0, self.propScale), random.uniform(0, self.propScale)  # Random positions for simplicity
+            host = Host(i, x, y, self.aOn, self.aOff, self)
             self.hosts.append(host)
 
         for i in range(num_routers):
-            x, y = random.uniform(0, propScale), random.uniform(0, propScale)
-            router = Router(i, x, y, buffSize, self)
+            x, y = random.uniform(0, self.propScale), random.uniform(0, self.propScale)
+            router = Router(i, x, y, self.buffSize, self)
             self.routers.append(router)
 
         # Create links between hosts and their nearest router (simple model)
@@ -297,10 +313,17 @@ class Network:
                 router1.links.append(link1)
                 # No need to create a link from router2 -> router1, because it will happen later
 
+    # This is the main loop that everything gets run from
     def run_simulation(self, ticks):
         for tick in range(ticks):
-            self.simulate_tick(tick)
+            self.simulate_tick(tick)    # Simulate one tick
+
+            # Log data between each tick
+            self.ticknums.append(self.ticknum)
+            self.droppedPacketPercentages.append(dropP / sentP)
+            self.ticknum += 1
     
+    # When this is called, one tick of time passes on the network
     def simulate_tick(self, _):
         # Process packets in the network
         for host in self.hosts:
@@ -329,25 +352,28 @@ class Network:
                         packet = router.udp_queue.pop(0)  # Drop packet
                         if debug == True: print(f"Router {router.id}: Dropped packet from {packet['source'].id} to {packet['destination'].id}")
                         dropP = dropP+1
+    
+    # Returns the proportion of full queues
     def qCheck(self):
         fullQ = 0
         totalQ = 0
         for router in self.routers:
             totalQ = totalQ+1 #UDP queue
-            if len(router.udp_queue) >= buffSize: fullQ = fullQ+1
+            if len(router.udp_queue) >= self.buffSize: fullQ = fullQ+1
             for queue in router.tcp_queues.values(): #TCP queues
                 totalQ = totalQ+1
-                if len(queue) >= buffSize: fullQ = fullQ+1
+                if len(queue) >= self.buffSize: fullQ = fullQ+1
                 
         for host in self.hosts:
             totalQ = totalQ+1 #UDP queue
-            if len(host.udp_queue) >= buffSize: fullQ = fullQ+1
+            if len(host.udp_queue) >= self.buffSize: fullQ = fullQ+1
             for queue in host.tcp_queues.values(): #TCP queues
                 totalQ = totalQ+1
-                if len(queue) >= buffSize: fullQ = fullQ+1
+                if len(queue) >= self.buffSize: fullQ = fullQ+1
         propQ = fullQ / totalQ
         return propQ
-            
+
+    # Prints some network data to console        
     def print_network_data(self):
         qSum = 0
         for router in self.routers:
@@ -357,8 +383,8 @@ class Network:
         qProp = self.qCheck()
         print(f"Total packets sent: {sentP}, total packets dropped: {dropP}.\nAverage Queue length: {qAvg}.\nProportion of full Queues: {qProp}")
 
+    # Print a list of every current host, router, and link (for debugging)
     def print_network_status(self):
-        # Print current status of network (for debugging)
         print("--------------")
         print("|   Hosts:   |")
         print("--------------")
@@ -392,6 +418,15 @@ class Network:
                 if link.source.id == source.id and link.source.isHost == source.isHost and link.destination.id == destination.id and link.destination.isHost == destination.isHost:
                     return link
         return None  # No link with specified source & destination was found
+    
+    # Prints graphs of the data logged during runtime
+    def print_graphs(self):
+        # % of Dropped Packets on each Tick
+        plt.plot(self.ticknums, self.droppedPacketPercentages)
+        plt.xlabel("Ticks")
+        plt.ylabel("% of Dropped Packets")
+        plt.title("Proportion of Dropped Packets over Time")
+        plt.show()
 
 # Main Execution
 
@@ -399,6 +434,8 @@ class Network:
 #debug = True
 debug = False
 
+# Logging variable - set to True for data logging (will produce a graph)
+log = True
 
 # Data tracking variables
 sentP = 0
@@ -408,13 +445,14 @@ Qprop = 0
 
 # Initialize network parameters
 num_hosts = 10
-num_routers = 3
+num_routers = 10
 buffSize = 10
 aOn = 1.5
 aOff = 1.5
-propScale = 10
-# Initialize RED parameters
-maxp = 1.0  # Max packet drop probability
+propScale = 100
+
+# Initialize RED/URED parameters
+maxp = 0.0  # Max packet drop probability
 minth = 1  # Min threshold for RED
 maxth = 3  # Max threshold for RED
 wq = 0.1  # Weight for RED average queue size
@@ -424,7 +462,10 @@ network = Network(num_hosts, num_routers, aOn, aOff, buffSize, propScale, maxp, 
 
 # Run simulation
 network.run_simulation(3000)  # Run for 1000 ticks
-print(f"Test parameters: Hosts: {num_hosts}, Rounters: {num_routers}, Buffersize: {buffSize}, alphaOn: {aOn}, AlphaOff: {aOff}, Scale factor: {propScale}. RED variables: maxp: {maxp}, min threshhold: {minth}, max threshhold: {maxth}, wq: {wq}")
+print(f"Test parameters: Hosts: {num_hosts}, Routers: {num_routers}, Buffersize: {buffSize}, alphaOn: {aOn}, AlphaOff: {aOff}, Scale factor: {propScale}. RED variables: maxp: {maxp}, min threshold: {minth}, max threshold: {maxth}, wq: {wq}")
 network.print_network_data()
+
 if debug:
     network.print_network_status()
+if log:
+    network.print_graphs()
